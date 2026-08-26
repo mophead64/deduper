@@ -1,0 +1,18 @@
+services:
+  deduper:
+    build: .
+    ports:
+      - "8080:8080"
+    # environment:
+    #   DEDUPER_SCAN_BASE: /scan  # default; only needed to point elsewhere
+    volumes:
+      - deduper-data:/data
+      # Add one read-only bind mount per path you want scanned, under
+      # /scan/<name>. Each is auto-registered as an enabled root (labeled
+      # with <name>) the next time the container starts — no manual "Add
+      # root" step needed. See README.md's "Root auto-discovery" section.
+      - ./test:/scan/test:ro   # the repo's own test fixture, for a quick try
+      # - /mnt/photos:/scan/photos:ro
+      # - /mnt/backups:/scan/backups:ro
+volumes:
+  deduper-data:

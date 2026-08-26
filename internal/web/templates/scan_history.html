@@ -1,0 +1,46 @@
+{{define "scan_history.html"}}
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>Deduper — Scan History</title>
+  {{template "style" .}}
+  {{template "htmx_script" .}}
+</head>
+<body>
+  {{template "nav" .}}
+  <main>
+    <div class="panel">
+      <h2>Scan history</h2>
+      {{if not .Scans}}
+        <p class="muted">No scans yet.</p>
+      {{else}}
+      <table>
+        <thead>
+          <tr><th>Started</th><th>Duration</th><th>Status</th><th>Seen</th><th>New</th><th>Changed</th><th>Removed</th><th>Skipped</th><th>Bytes hashed</th></tr>
+        </thead>
+        <tbody>
+        {{range .Scans}}
+          <tr>
+            <td>{{time .StartedAt}}</td>
+            <td class="muted">{{duration .StartedAt .FinishedAt}}</td>
+            <td><span class="badge {{.Status}}">{{.Status}}</span></td>
+            <td>{{.FilesSeen}}</td>
+            <td>{{.FilesNew}}</td>
+            <td>{{.FilesChanged}}</td>
+            <td>{{.FilesRemoved}}</td>
+            <td>{{.FilesSkipped}}</td>
+            <td>{{bytes .BytesHashed}}</td>
+          </tr>
+          {{if .Error}}
+          <tr><td colspan="9" class="muted">Error: {{.Error}}</td></tr>
+          {{end}}
+        {{end}}
+        </tbody>
+      </table>
+      {{end}}
+    </div>
+  </main>
+</body>
+</html>
+{{end}}

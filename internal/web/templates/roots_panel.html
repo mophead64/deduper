@@ -1,0 +1,46 @@
+{{define "roots_panel.html"}}
+<div class="panel" id="roots-panel">
+  <h2>Roots</h2>
+  {{if not .Roots}}
+    <p class="muted">No roots added yet. Add a bind-mounted path below (e.g. <code>/scan/photos</code>).</p>
+  {{else}}
+  <table>
+    <thead><tr><th>Path</th><th>Label</th><th>Added</th><th>Source</th><th>Status</th><th></th></tr></thead>
+    <tbody>
+    {{range .Roots}}
+      <tr>
+        <td><code>{{.Path}}</code></td>
+        <td>{{if .Label}}{{.Label}}{{else}}<span class="muted">—</span>{{end}}</td>
+        <td class="muted">{{time .AddedAt}}</td>
+        <td>
+          {{if eq (print .Source) "auto"}}
+            <span class="badge auto" title="Found automatically under /scan on startup">auto-discovered</span>
+          {{else}}
+            <span class="badge manual" title="Added by hand through this UI">manual</span>
+          {{end}}
+        </td>
+        <td>
+          {{if .Enabled}}<span class="badge on">enabled</span>{{else}}<span class="badge off">disabled</span>{{end}}
+        </td>
+        <td class="row">
+          <form class="inline" hx-post="/roots/{{.ID}}/toggle" hx-target="#roots-panel" hx-swap="outerHTML">
+            <button type="submit" class="secondary">{{if .Enabled}}Disable{{else}}Enable{{end}}</button>
+          </form>
+          <form class="inline" hx-post="/roots/{{.ID}}/delete" hx-target="#roots-panel" hx-swap="outerHTML"
+                hx-confirm="Remove this root? Previously recorded files stay in the database until the next scan.">
+            <button type="submit" class="danger" {{if $.Running}}disabled{{end}}>Remove</button>
+          </form>
+        </td>
+      </tr>
+    {{end}}
+    </tbody>
+  </table>
+  {{end}}
+
+  <form hx-post="/roots" hx-target="#roots-panel" hx-swap="outerHTML" class="row" style="margin-top:16px">
+    <input type="text" name="path" placeholder="/scan/photos" required style="flex:1;min-width:220px">
+    <input type="text" name="label" placeholder="Label (optional)">
+    <button type="submit">Add root</button>
+  </form>
+</div>
+{{end}}

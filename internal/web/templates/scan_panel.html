@@ -1,0 +1,75 @@
+{{define "scan_panel.html"}}
+<div class="panel" id="scan-panel">
+  <h2>Scan</h2>
+  {{if .Current}}
+  {{if eq (print .Current.Status) "running"}}
+    <div class="row between">
+      <span><span class="badge running">running</span> <span id="sp-phase" class="muted">{{.Current.Phase}}</span></span>
+      <span class="muted" id="sp-elapsed"></span>
+    </div>
+    <div class="progress-bar"><div class="fill" id="sp-fill" style="width:5%"></div></div>
+    <div class="row">
+      <span><strong id="sp-seen">{{.Current.FilesSeen}}</strong> seen</span>
+      <span><strong id="sp-new">{{.Current.FilesNew}}</strong> new</span>
+      <span><strong id="sp-changed">{{.Current.FilesChanged}}</strong> changed</span>
+      <span><strong id="sp-removed">{{.Current.FilesRemoved}}</strong> removed</span>
+      <span><strong id="sp-skipped">{{.Current.FilesSkipped}}</strong> skipped</span>
+      <span><strong id="sp-bytes">{{bytes .Current.BytesHashed}}</strong> hashed</span>
+    </div>
+    <div class="path-line" id="sp-path">&nbsp;</div>
+    <script>
+      (function() {
+        var es = new EventSource("/scans/{{.Current.ID}}/events");
+        function setText(id, v) { var el = document.getElementById(id); if (el) el.textContent = v; }
+        function humanBytes(n) {
+          var units = ["B","KB","MB","GB","TB","PB"], i = 0;
+          while (n >= 1024 && i < units.length - 1) { n /= 1024; i++; }
+          return n.toFixed(1) + " " + units[i];
+        }
+        es.addEventListener("progress", function(e) {
+          var d = JSON.parse(e.data);
+          setText("sp-phase", d.phase);
+          setText("sp-seen", d.files_seen);
+          setText("sp-new", d.files_new);
+          setText("sp-changed", d.files_changed);
+          setText("sp-removed", d.files_removed);
+          setText("sp-skipped", d.files_skipped);
+          setText("sp-bytes", humanBytes(d.bytes_hashed));
+          setText("sp-path", d.current_path || " ");
+          setText("sp-elapsed", Math.round(d.elapsed_ms / 1000) + "s elapsed");
+          var fill = document.getElementById("sp-fill");
+          if (fill) {
+            // Phase alone doesn't give a reliable percentage (total file
+            // count isn't known upfront), so the bar reflects phase
+            // progression rather than a precise completion percentage.
+            var pct = d.phase === "hashing" ? 65 : d.phase === "finalizing" ? 95 : 25;
+            fill.style.width = pct + "%";
+          }
+        });
+        es.addEventListener("scan_completed", function() { window.location.reload(); });
+        es.addEventListener("scan_failed", function() { window.location.reload(); });
+      })();
+    </script>
+  {{else}}
+    {{if eq (print .Current.Status) "failed"}}
+      <div class="error-box">Last scan failed: {{.Current.Error}}</div>
+    {{end}}
+    {{template "scan_start_form.html" .}}
+  {{end}}
+  {{else}}
+    {{template "scan_start_form.html" .}}
+  {{end}}
+</div>
+{{end}}
+
+{{define "scan_start_form.html"}}
+<form hx-post="/scans" hx-target="#scan-panel" hx-swap="outerHTML" class="row">
+  <label for="scan-root-select" class="muted">Scan</label>
+  <select id="scan-root-select" name="root_id">
+    <option value="all">All enabled roots</option>
+    {{range .Roots}}{{if .Enabled}}<option value="{{.ID}}">{{.Path}}</option>{{end}}{{end}}
+  </select>
+  <button type="submit">Start scan</button>
+</form>
+<footer class="hint">Scans are manually triggered. Root paths are only ever read, never modified.</footer>
+{{end}}

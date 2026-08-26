@@ -1,0 +1,34 @@
+{{define "duplicates.html"}}
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>Deduper — Duplicates</title>
+  {{template "style" .}}
+  {{template "htmx_script" .}}
+</head>
+<body>
+  {{template "nav" .}}
+  <main>
+    <div class="panel">
+      <h2>Duplicate groups</h2>
+      <form class="row" hx-get="/duplicates" hx-target="#dup-results" hx-push-url="true">
+        <label for="f-root" class="muted">Root</label>
+        <select id="f-root" name="root_id">
+          <option value="0">All roots</option>
+          {{range .Roots}}
+            <option value="{{.ID}}" {{if eq $.RootID .ID}}selected{{end}}>{{.Path}}</option>
+          {{end}}
+        </select>
+        <label for="f-size" class="muted">Min size (bytes)</label>
+        <input id="f-size" type="number" name="min_size" min="0" value="{{if .MinSize}}{{.MinSize}}{{end}}" style="width:120px">
+        <label for="f-q" class="muted">Name contains</label>
+        <input id="f-q" type="text" name="q" value="{{.Query}}" placeholder="filename fragment">
+        <button type="submit">Filter</button>
+      </form>
+    </div>
+    {{template "duplicates_results.html" .}}
+  </main>
+</body>
+</html>
+{{end}}

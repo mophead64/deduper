@@ -1,0 +1,49 @@
+{{define "dashboard.html"}}
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>Deduper</title>
+  {{template "style" .}}
+  {{template "htmx_script" .}}
+</head>
+<body>
+  {{template "nav" .}}
+  <main>
+    <div class="stat-grid">
+      <div class="stat"><div class="value">{{.Summary.TotalFiles}}</div><div class="label">files tracked</div></div>
+      <div class="stat"><div class="value">{{bytes .Summary.TotalBytes}}</div><div class="label">total size</div></div>
+      <div class="stat"><div class="value">{{.Summary.TotalGroups}}</div><div class="label">duplicate groups</div></div>
+      <div class="stat"><div class="value">{{bytes .Summary.TotalReclaimable}}</div><div class="label">reclaimable space</div></div>
+    </div>
+
+    {{template "scan_panel.html" .}}
+    {{template "roots_panel.html" .}}
+
+    <div class="panel">
+      <div class="row between">
+        <h2>Recent scans</h2>
+        <a href="/scans" class="muted">View all →</a>
+      </div>
+      {{if not .RecentScans}}
+        <p class="muted">No scans yet.</p>
+      {{else}}
+      <table>
+        <thead><tr><th>Started</th><th>Status</th><th>Files</th><th>Bytes hashed</th></tr></thead>
+        <tbody>
+        {{range .RecentScans}}
+          <tr>
+            <td>{{time .StartedAt}}</td>
+            <td><span class="badge {{.Status}}">{{.Status}}</span></td>
+            <td>{{.FilesSeen}}</td>
+            <td>{{bytes .BytesHashed}}</td>
+          </tr>
+        {{end}}
+        </tbody>
+      </table>
+      {{end}}
+    </div>
+  </main>
+</body>
+</html>
+{{end}}

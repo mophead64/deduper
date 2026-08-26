@@ -1,0 +1,34 @@
+{{define "duplicates_results.html"}}
+<div class="panel" id="dup-results">
+  <div class="row between">
+    <span class="muted">{{.Total}} duplicate group(s)</span>
+    <span class="muted">Page {{.Page}} of {{.TotalPages}}</span>
+  </div>
+  {{if not .Groups}}
+    <p class="muted">No duplicate groups match. Run a scan, or widen your filters.</p>
+  {{else}}
+  <table>
+    <thead><tr><th>Size (each)</th><th>Copies</th><th>Reclaimable</th><th>Content hash</th><th></th></tr></thead>
+    <tbody>
+    {{range .Groups}}
+      <tr>
+        <td>{{bytes .Size}}</td>
+        <td>{{.DistinctInstanceCount}}{{if ne .DistinctInstanceCount .MemberCount}} <span class="muted">({{.MemberCount}} paths, some hardlinked)</span>{{end}}</td>
+        <td><strong>{{bytes .ReclaimableBytes}}</strong></td>
+        <td><code>{{shorthash .FullHash}}</code></td>
+        <td><a href="/duplicates/{{.ID}}" class="btn secondary">View</a></td>
+      </tr>
+    {{end}}
+    </tbody>
+  </table>
+  <div class="pagination">
+    {{if gt .Page 1}}
+      <a class="btn secondary" hx-get="/duplicates?root_id={{.RootID}}&min_size={{.MinSize}}&q={{.Query}}&page={{sub .Page 1}}" hx-target="#dup-results" hx-push-url="true">← Prev</a>
+    {{end}}
+    {{if lt .Page .TotalPages}}
+      <a class="btn secondary" hx-get="/duplicates?root_id={{.RootID}}&min_size={{.MinSize}}&q={{.Query}}&page={{add .Page 1}}" hx-target="#dup-results" hx-push-url="true">Next →</a>
+    {{end}}
+  </div>
+  {{end}}
+</div>
+{{end}}

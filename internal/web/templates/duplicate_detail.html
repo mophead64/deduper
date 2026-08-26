@@ -1,0 +1,42 @@
+{{define "duplicate_detail.html"}}
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>Deduper — Duplicate Group</title>
+  {{template "style" .}}
+  {{template "htmx_script" .}}
+</head>
+<body>
+  {{template "nav" .}}
+  <main>
+    <p><a href="/duplicates" class="muted">← Back to duplicates</a></p>
+    <div class="panel">
+      <h2>Duplicate group</h2>
+      <div class="row">
+        <span>Size each: <strong>{{bytes .Group.Size}}</strong></span>
+        <span>Copies: <strong>{{.Group.DistinctInstanceCount}}</strong> ({{.Group.MemberCount}} path(s))</span>
+        <span>Reclaimable: <strong>{{bytes .Group.ReclaimableBytes}}</strong></span>
+        <span class="muted">SHA-256: <code>{{.Group.FullHash}}</code></span>
+      </div>
+    </div>
+    <div class="panel">
+      <h2>Files</h2>
+      <table>
+        <thead><tr><th>Root</th><th>Path</th><th></th></tr></thead>
+        <tbody>
+        {{range .Members}}
+          <tr>
+            <td><code>{{.Member.RootPath}}</code></td>
+            <td>{{.Member.RelPath}}</td>
+            <td>{{if .SharesInode}}<span class="badge off">hardlinked, no space to reclaim</span>{{end}}</td>
+          </tr>
+        {{end}}
+        </tbody>
+      </table>
+      <footer class="hint">Deduper only flags duplicates — nothing here has been or will be deleted automatically.</footer>
+    </div>
+  </main>
+</body>
+</html>
+{{end}}

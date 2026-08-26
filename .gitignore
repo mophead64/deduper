@@ -1,0 +1,6 @@
+/data/
+*.db
+*.db-wal
+*.db-shm
+/deduper
+notes.txt
