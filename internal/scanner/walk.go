@@ -1,9 +1,11 @@
 package scanner
 
 import (
+	"context"
 	"io/fs"
 	"os"
 	"path/filepath"
+	"sync"
 	"syscall"
 )
 
@@ -24,60 +26,99 @@ type walkResult struct {
 	skipped bool       // symlink, special file, or a stat/permission error
 }
 
-// walkRoot walks absRoot depth-first, calling visit for every entry. It never
-// follows symlinks (README.md §7.4) and never returns an error for a single bad
-// entry — permission errors and special files are reported via walkResult and
-// the walk continues, per README.md §7 ("permission errors ... scan continues").
-func walkRoot(absRoot string, visit func(walkResult)) error {
-	return filepath.WalkDir(absRoot, func(path string, d fs.DirEntry, err error) error {
+// walkRoot walks absRoot with up to `workers` directories being read
+// concurrently, calling visit for every entry. visit is invoked from multiple
+// goroutines, so it must be safe for concurrent use. It never follows symlinks
+// (README.md §7.4) and never aborts for a single bad entry — permission errors
+// and special files are reported via walkResult and the walk continues, per
+// README.md §7. Traversal stops promptly once ctx is cancelled.
+//
+// filepath.WalkDir is single-threaded, which makes the walk latency-bound on
+// readdir/stat on deep trees and network storage; fanning directory reads out
+// keeps the disk (and, downstream, the DB writer) busy.
+func walkRoot(ctx context.Context, absRoot string, workers int, visit func(walkResult)) error {
+	if workers < 1 {
+		workers = 1
+	}
+	// sem bounds how many directory reads run as their own goroutine; when it's
+	// full a directory is walked inline on the current goroutine instead, so
+	// traversal never stalls waiting for a slot.
+	sem := make(chan struct{}, workers)
+	var wg sync.WaitGroup
+
+	var walk func(dir string)
+	walk = func(dir string) {
+		defer wg.Done()
+		if ctx.Err() != nil {
+			return
+		}
+		entries, err := os.ReadDir(dir)
 		if err != nil {
-			// Typically a permission error opening a directory, or a race
-			// where the entry vanished mid-walk. Skip it, keep walking.
+			// Permission error on the directory, or it vanished mid-walk.
 			visit(walkResult{skipped: true})
-			if d != nil && d.IsDir() {
-				return filepath.SkipDir
+			return
+		}
+		for _, d := range entries {
+			if ctx.Err() != nil {
+				return
 			}
-			return nil
+			full := filepath.Join(dir, d.Name())
+			if d.IsDir() {
+				wg.Add(1)
+				select {
+				case sem <- struct{}{}:
+					go func(p string) {
+						defer func() { <-sem }()
+						walk(p)
+					}(full)
+				default:
+					walk(full)
+				}
+				continue
+			}
+			visitFile(absRoot, full, d, visit)
 		}
-		if d.IsDir() {
-			return nil
-		}
-		if d.Type()&fs.ModeSymlink != 0 {
-			visit(walkResult{skipped: true})
-			return nil
-		}
-		if !d.Type().IsRegular() {
-			// socket, device, FIFO, etc.
-			visit(walkResult{skipped: true})
-			return nil
-		}
+	}
 
-		info, err := d.Info()
-		if err != nil {
-			visit(walkResult{skipped: true})
-			return nil
-		}
-		sys, ok := info.Sys().(*syscall.Stat_t)
-		if !ok {
-			visit(walkResult{skipped: true})
-			return nil
-		}
-		rel, err := filepath.Rel(absRoot, path)
-		if err != nil {
-			visit(walkResult{skipped: true})
-			return nil
-		}
+	wg.Add(1)
+	walk(absRoot)
+	wg.Wait()
+	return ctx.Err()
+}
 
-		visit(walkResult{entry: &statEntry{
-			absPath: path,
-			relPath: rel,
-			size:    info.Size(),
-			mtimeNs: info.ModTime().UnixNano(),
-			device:  uint64(sys.Dev),
-			inode:   uint64(sys.Ino),
-		}})
-		return nil
-	})
+func visitFile(absRoot, path string, d fs.DirEntry, visit func(walkResult)) {
+	if d.Type()&fs.ModeSymlink != 0 {
+		visit(walkResult{skipped: true})
+		return
+	}
+	if !d.Type().IsRegular() {
+		// socket, device, FIFO, etc.
+		visit(walkResult{skipped: true})
+		return
+	}
+	info, err := d.Info()
+	if err != nil {
+		visit(walkResult{skipped: true})
+		return
+	}
+	sys, ok := info.Sys().(*syscall.Stat_t)
+	if !ok {
+		visit(walkResult{skipped: true})
+		return
+	}
+	rel, err := filepath.Rel(absRoot, path)
+	if err != nil {
+		visit(walkResult{skipped: true})
+		return
+	}
+	visit(walkResult{entry: &statEntry{
+		absPath: path,
+		relPath: rel,
+		size:    info.Size(),
+		mtimeNs: info.ModTime().UnixNano(),
+		device:  uint64(sys.Dev),
+		inode:   uint64(sys.Ino),
+	}})
 }
 
 // rootExists is a cheap upfront check so a bad/unmounted root path fails the

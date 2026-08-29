@@ -5,12 +5,23 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"runtime"
+	"strings"
 
 	_ "modernc.org/sqlite"
 )
 
+// Store wraps two connection pools over the same SQLite file:
+//
+//   - rw: a single-connection pool for every write. SQLite allows exactly one
+//     writer, so funnelling writes through one connection (with BEGIN IMMEDIATE
+//     via _txlock) avoids "database is locked" churn between goroutines.
+//   - ro: a multi-connection pool for reads. WAL mode lets readers run
+//     concurrently with the writer against a consistent snapshot, so the web UI
+//     stays responsive while a scan hammers the writer.
 type Store struct {
-	db *sql.DB
+	rw *sql.DB
+	ro *sql.DB
 }
 
 const schema = `
@@ -83,43 +94,74 @@ CREATE TABLE IF NOT EXISTS duplicate_group_members (
 );
 `
 
-// Open opens (creating if necessary) the SQLite database at path and applies
-// the schema. WAL mode is enabled so the web UI can keep reading duplicate
-// data while a scan is writing.
-func Open(ctx context.Context, path string) (*Store, error) {
-	db, err := sql.Open("sqlite", path)
+// readPoolSize caps the reader pool. A handful of connections is plenty for the
+// UI's query load and keeps the memory each idle SQLite connection holds modest.
+func readPoolSize() int {
+	n := runtime.NumCPU()
+	if n < 4 {
+		n = 4
+	}
+	if n > 8 {
+		n = 8
+	}
+	return n
+}
+
+func openPool(ctx context.Context, path string, params []string, maxOpen int) (*sql.DB, error) {
+	dsn := path
+	if len(params) > 0 {
+		dsn += "?" + strings.Join(params, "&")
+	}
+	db, err := sql.Open("sqlite", dsn)
 	if err != nil {
-		return nil, fmt.Errorf("open db: %w", err)
+		return nil, err
 	}
-	// SQLite handles one writer at a time; a single connection avoids
-	// "database is locked" errors under concurrent goroutines within this
-	// process and is fine for this app's throughput.
-	db.SetMaxOpenConns(1)
-
-	pragmas := []string{
-		"PRAGMA journal_mode=WAL",
-		"PRAGMA synchronous=NORMAL",
-		"PRAGMA foreign_keys=ON",
-		"PRAGMA busy_timeout=5000",
-	}
-	for _, p := range pragmas {
-		if _, err := db.ExecContext(ctx, p); err != nil {
-			db.Close()
-			return nil, fmt.Errorf("pragma %q: %w", p, err)
-		}
-	}
-
-	if _, err := db.ExecContext(ctx, schema); err != nil {
+	db.SetMaxOpenConns(maxOpen)
+	db.SetMaxIdleConns(maxOpen)
+	if err := db.PingContext(ctx); err != nil {
 		db.Close()
+		return nil, err
+	}
+	return db, nil
+}
+
+// Open opens (creating if necessary) the SQLite database at path and applies
+// the schema. WAL mode is enabled so the reader pool can keep serving the UI
+// while a scan writes through the single-writer pool.
+func Open(ctx context.Context, path string) (*Store, error) {
+	// BEGIN IMMEDIATE (via _txlock) makes the writer take its lock up front
+	// rather than failing on upgrade halfway through a batch transaction.
+	rw, err := openPool(ctx, path, []string{
+		"_busy_timeout=5000",
+		"_journal_mode=WAL",
+		"_synchronous=NORMAL",
+		"_foreign_keys=1",
+		"_txlock=immediate",
+	}, 1)
+	if err != nil {
+		return nil, fmt.Errorf("open write pool: %w", err)
+	}
+
+	if _, err := rw.ExecContext(ctx, schema); err != nil {
+		rw.Close()
 		return nil, fmt.Errorf("apply schema: %w", err)
 	}
-
-	if err := migrate(ctx, db); err != nil {
-		db.Close()
+	if err := migrate(ctx, rw); err != nil {
+		rw.Close()
 		return nil, fmt.Errorf("migrate: %w", err)
 	}
 
-	return &Store{db: db}, nil
+	ro, err := openPool(ctx, path, []string{
+		"_busy_timeout=5000",
+		"_foreign_keys=1",
+		"_query_only=1",
+	}, readPoolSize())
+	if err != nil {
+		rw.Close()
+		return nil, fmt.Errorf("open read pool: %w", err)
+	}
+
+	return &Store{rw: rw, ro: ro}, nil
 }
 
 // migrate applies schema changes that CREATE TABLE IF NOT EXISTS can't: an
@@ -157,9 +199,16 @@ func columnExists(ctx context.Context, db *sql.DB, table, column string) (bool, 
 }
 
 func (s *Store) Close() error {
-	return s.db.Close()
+	err := s.ro.Close()
+	if rwErr := s.rw.Close(); err == nil {
+		err = rwErr
+	}
+	return err
 }
 
-// DB exposes the underlying handle for packages that need bespoke queries
-// (kept unexported-by-convention: only store subfiles should use this).
-func (s *Store) conn() *sql.DB { return s.db }
+// conn is the single-writer pool: everything that mutates the database.
+func (s *Store) conn() *sql.DB { return s.rw }
+
+// reader is the concurrent read pool: SELECTs that must not queue behind a
+// running scan's writes.
+func (s *Store) reader() *sql.DB { return s.ro }

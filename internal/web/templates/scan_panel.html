@@ -46,8 +46,13 @@
             fill.style.width = pct + "%";
           }
         });
-        es.addEventListener("scan_completed", function() { window.location.reload(); });
-        es.addEventListener("scan_failed", function() { window.location.reload(); });
+        function finish() { es.close(); window.location.reload(); }
+        es.addEventListener("scan_completed", finish);
+        es.addEventListener("scan_failed", finish);
+        // The server ends the stream once the scan is terminal; without an
+        // explicit close here the browser's EventSource would keep reconnecting
+        // to a scan that's already done.
+        es.onerror = function() { if (es.readyState === EventSource.CLOSED) es.close(); };
       })();
     </script>
   {{else}}

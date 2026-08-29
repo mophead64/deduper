@@ -58,7 +58,7 @@ func (s *Store) MarkInterruptedScans(ctx context.Context) error {
 func (s *Store) GetScan(ctx context.Context, id int64) (model.Scan, error) {
 	var sc model.Scan
 	var finishedAt *time.Time
-	err := s.conn().QueryRowContext(ctx,
+	err := s.reader().QueryRowContext(ctx,
 		`SELECT id, started_at, finished_at, status, phase, files_seen, files_new,
 		 files_changed, files_removed, files_skipped, bytes_hashed, error
 		 FROM scans WHERE id = ?`, id,
@@ -72,13 +72,10 @@ func (s *Store) GetScan(ctx context.Context, id int64) (model.Scan, error) {
 }
 
 func (s *Store) CurrentScan(ctx context.Context) (*model.Scan, error) {
-	// The id lookup and GetScan below must not overlap: with a single-writer
-	// SQLite connection, a Rows left open while a second query is issued on
-	// the same *sql.DB blocks forever waiting for a connection that can't be
-	// returned to the pool until this Rows is closed. Draining/closing rows
-	// (via the explicit Close, not just defer) before calling GetScan avoids
-	// that self-deadlock.
-	rows, err := s.conn().QueryContext(ctx,
+	// Close the id lookup's Rows explicitly before calling GetScan: holding a
+	// Rows open while issuing another query can pin a pool connection, and on a
+	// small/busy read pool that risks stalling until this Rows is drained.
+	rows, err := s.reader().QueryContext(ctx,
 		`SELECT id FROM scans WHERE status = ? ORDER BY started_at DESC LIMIT 1`, string(model.ScanRunning))
 	if err != nil {
 		return nil, err
@@ -106,7 +103,7 @@ func (s *Store) CurrentScan(ctx context.Context) (*model.Scan, error) {
 }
 
 func (s *Store) ListScans(ctx context.Context, limit int) ([]model.Scan, error) {
-	rows, err := s.conn().QueryContext(ctx,
+	rows, err := s.reader().QueryContext(ctx,
 		`SELECT id, started_at, finished_at, status, phase, files_seen, files_new,
 		 files_changed, files_removed, files_skipped, bytes_hashed, error
 		 FROM scans ORDER BY started_at DESC LIMIT ?`, limit)

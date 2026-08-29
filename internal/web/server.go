@@ -9,6 +9,7 @@ import (
 	"html/template"
 	"log/slog"
 	"net/http"
+	"runtime/debug"
 	"sync"
 
 	"github.com/mophead64/deduper/internal/model"
@@ -134,6 +135,11 @@ func (s *Server) startScan(roots []model.Root) (int64, error) {
 			s.log.Error("failed to finalize scan record", "scan_id", scanID, "error", err)
 		}
 		s.hub.publish(model.ProgressEvent{Type: evType, ScanID: scanID, Error: errMsg})
+
+		// A scan builds large transient structures (the per-root file snapshot,
+		// candidate pages). Hand that memory back to the OS now rather than
+		// letting RSS sit high until the next GC cycle happens to release it.
+		debug.FreeOSMemory()
 	}()
 
 	return scanID, nil

@@ -60,7 +60,7 @@ func (s *Store) SetRootEnabled(ctx context.Context, id int64, enabled bool) erro
 }
 
 func (s *Store) ListRoots(ctx context.Context) ([]model.Root, error) {
-	rows, err := s.conn().QueryContext(ctx,
+	rows, err := s.reader().QueryContext(ctx,
 		`SELECT id, path, label, added_at, enabled, source FROM roots ORDER BY added_at`)
 	if err != nil {
 		return nil, fmt.Errorf("list roots: %w", err)
@@ -80,7 +80,7 @@ func (s *Store) ListRoots(ctx context.Context) ([]model.Root, error) {
 
 func (s *Store) GetRoot(ctx context.Context, id int64) (model.Root, error) {
 	var r model.Root
-	err := s.conn().QueryRowContext(ctx,
+	err := s.reader().QueryRowContext(ctx,
 		`SELECT id, path, label, added_at, enabled, source FROM roots WHERE id = ?`, id,
 	).Scan(&r.ID, &r.Path, &r.Label, &r.AddedAt, &r.Enabled, &r.Source)
 	return r, err

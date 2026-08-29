@@ -2,6 +2,7 @@ package store
 
 import (
 	"context"
+	"database/sql"
 	"fmt"
 
 	"github.com/mophead64/deduper/internal/model"
@@ -13,98 +14,41 @@ import (
 // (size, full_hash); a group's distinct_instance_count counts distinct
 // (device, inode) pairs so hardlinked copies of the same data collapse to one
 // instance and don't inflate reclaimable space.
+//
+// The whole rebuild is three set-based statements — no per-group round trips and
+// no loading every group key into a Go slice — so it stays cheap and flat in
+// memory even with millions of files.
 func (s *Store) RebuildDuplicateGroups(ctx context.Context) error {
-	tx, err := s.conn().BeginTx(ctx, nil)
-	if err != nil {
-		return err
-	}
-	defer tx.Rollback()
-
-	if _, err := tx.ExecContext(ctx, `DELETE FROM duplicate_group_members`); err != nil {
-		return err
-	}
-	if _, err := tx.ExecContext(ctx, `DELETE FROM duplicate_groups`); err != nil {
-		return err
-	}
-
-	rows, err := tx.QueryContext(ctx,
-		`SELECT size, full_hash FROM files
-		 WHERE status = 'present' AND full_hash != '' AND size > 0
-		 GROUP BY size, full_hash HAVING COUNT(*) > 1`)
-	if err != nil {
-		return err
-	}
-	type key struct {
-		size int64
-		hash string
-	}
-	var keys []key
-	for rows.Next() {
-		var k key
-		if err := rows.Scan(&k.size, &k.hash); err != nil {
-			rows.Close()
+	return s.inTx(ctx, func(tx *sql.Tx) error {
+		if _, err := tx.ExecContext(ctx, `DELETE FROM duplicate_group_members`); err != nil {
 			return err
 		}
-		keys = append(keys, k)
-	}
-	rows.Close()
-	if err := rows.Err(); err != nil {
-		return err
-	}
-
-	for _, k := range keys {
-		memberRows, err := tx.QueryContext(ctx,
-			`SELECT id, device, inode FROM files WHERE status = 'present' AND size = ? AND full_hash = ?`,
-			k.size, k.hash)
-		if err != nil {
+		if _, err := tx.ExecContext(ctx, `DELETE FROM duplicate_groups`); err != nil {
 			return err
 		}
-		type member struct {
-			id            int64
-			device, inode uint64
-		}
-		var members []member
-		instances := map[[2]uint64]bool{}
-		for memberRows.Next() {
-			var m member
-			if err := memberRows.Scan(&m.id, &m.device, &m.inode); err != nil {
-				memberRows.Close()
-				return err
-			}
-			members = append(members, m)
-			instances[[2]uint64{m.device, m.inode}] = true
-		}
-		memberRows.Close()
-		if err := memberRows.Err(); err != nil {
-			return err
-		}
-
-		distinctInstances := len(instances)
-		reclaimable := int64(distinctInstances-1) * k.size
-		if reclaimable < 0 {
-			reclaimable = 0
-		}
-
-		res, err := tx.ExecContext(ctx,
+		// COUNT(DISTINCT device || '/' || inode) collapses hardlinks: several
+		// paths sharing one (device, inode) count as a single on-disk instance.
+		if _, err := tx.ExecContext(ctx,
 			`INSERT INTO duplicate_groups (size, full_hash, member_count, distinct_instance_count, reclaimable_bytes)
-			 VALUES (?, ?, ?, ?, ?)`,
-			k.size, k.hash, len(members), distinctInstances, reclaimable)
-		if err != nil {
+			 SELECT f.size, f.full_hash, COUNT(*),
+			        COUNT(DISTINCT f.device || '/' || f.inode),
+			        (COUNT(DISTINCT f.device || '/' || f.inode) - 1) * f.size
+			 FROM files f
+			 WHERE f.status = 'present' AND f.full_hash != '' AND f.size > 0
+			 GROUP BY f.size, f.full_hash
+			 HAVING COUNT(*) > 1`); err != nil {
 			return err
 		}
-		groupID, err := res.LastInsertId()
-		if err != nil {
+		if _, err := tx.ExecContext(ctx,
+			`INSERT INTO duplicate_group_members (group_id, file_id)
+			 SELECT g.id, f.id
+			 FROM files f
+			 JOIN duplicate_groups g ON g.size = f.size AND g.full_hash = f.full_hash
+			 WHERE f.status = 'present' AND f.full_hash != '' AND f.size > 0`); err != nil {
 			return err
 		}
-		for _, m := range members {
-			if _, err := tx.ExecContext(ctx,
-				`INSERT INTO duplicate_group_members (group_id, file_id) VALUES (?, ?)`, groupID, m.id); err != nil {
-				return err
-			}
-		}
-	}
-
-	return tx.Commit()
+		return nil
+	})
 }
 
 type DuplicateFilter struct {
@@ -142,7 +86,7 @@ func (s *Store) ListDuplicateGroups(ctx context.Context, f DuplicateFilter) ([]m
 
 	var total int
 	countQuery := fmt.Sprintf(`SELECT COUNT(*) FROM duplicate_groups dg %s`, where)
-	if err := s.conn().QueryRowContext(ctx, countQuery, args...).Scan(&total); err != nil {
+	if err := s.reader().QueryRowContext(ctx, countQuery, args...).Scan(&total); err != nil {
 		return nil, 0, err
 	}
 
@@ -153,7 +97,7 @@ func (s *Store) ListDuplicateGroups(ctx context.Context, f DuplicateFilter) ([]m
 		 LIMIT ? OFFSET ?`, where)
 	args = append(args, f.PageSize, (f.Page-1)*f.PageSize)
 
-	rows, err := s.conn().QueryContext(ctx, query, args...)
+	rows, err := s.reader().QueryContext(ctx, query, args...)
 	if err != nil {
 		return nil, 0, err
 	}
@@ -172,7 +116,7 @@ func (s *Store) ListDuplicateGroups(ctx context.Context, f DuplicateFilter) ([]m
 
 func (s *Store) GetDuplicateGroup(ctx context.Context, id int64) (model.DuplicateGroup, error) {
 	var g model.DuplicateGroup
-	err := s.conn().QueryRowContext(ctx,
+	err := s.reader().QueryRowContext(ctx,
 		`SELECT id, size, full_hash, member_count, distinct_instance_count, reclaimable_bytes
 		 FROM duplicate_groups WHERE id = ?`, id,
 	).Scan(&g.ID, &g.Size, &g.FullHash, &g.MemberCount, &g.DistinctInstanceCount, &g.ReclaimableBytes)
@@ -180,7 +124,7 @@ func (s *Store) GetDuplicateGroup(ctx context.Context, id int64) (model.Duplicat
 }
 
 func (s *Store) GetDuplicateGroupMembers(ctx context.Context, groupID int64) ([]model.DuplicateGroupMember, error) {
-	rows, err := s.conn().QueryContext(ctx,
+	rows, err := s.reader().QueryContext(ctx,
 		`SELECT fl.id, fl.root_id, r.path, fl.rel_path, fl.size, fl.mtime_ns, fl.device, fl.inode
 		 FROM duplicate_group_members m
 		 JOIN files fl ON fl.id = m.file_id
@@ -212,13 +156,13 @@ type Summary struct {
 
 func (s *Store) SummaryStats(ctx context.Context) (Summary, error) {
 	var sum Summary
-	err := s.conn().QueryRowContext(ctx,
+	err := s.reader().QueryRowContext(ctx,
 		`SELECT COUNT(*), COALESCE(SUM(size), 0) FROM files WHERE status = 'present'`,
 	).Scan(&sum.TotalFiles, &sum.TotalBytes)
 	if err != nil {
 		return sum, err
 	}
-	err = s.conn().QueryRowContext(ctx,
+	err = s.reader().QueryRowContext(ctx,
 		`SELECT COUNT(*), COALESCE(SUM(reclaimable_bytes), 0) FROM duplicate_groups`,
 	).Scan(&sum.TotalGroups, &sum.TotalReclaimable)
 	return sum, err

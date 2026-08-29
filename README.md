@@ -224,11 +224,13 @@ which copy to keep — it never changes how a group is classified.
 
 ### Incremental rescans
 
-On a rescan of a root already in the database, a file whose `(size,
+On a rescan of a root already in the database, the walk loads that root's
+known files once and classifies each entry in memory. A file whose `(size,
 mtime_ns, device, inode)` is unchanged since it was last seen skips Stages 2
-and 4 entirely — its stored `partial_hash`/`full_hash` is reused as-is. Only
-new or changed files are re-hashed, which is what makes repeat scans of
-large, mostly-static trees fast.
+and 4 entirely — its stored `partial_hash`/`full_hash` is reused as-is — and
+costs **no database write at all**. Only new, changed, and now-missing files
+are written (missing is computed as a local set difference, not a table
+scan), which is what makes repeat scans of large, mostly-static trees fast.
 
 This trusts mtime as a proxy for "content unchanged": a file rewritten with
 its original content and a manually preserved mtime would be missed. That's
@@ -236,8 +238,13 @@ an accepted trade-off — the same one `rsync`, `make`, and similar tools make.
 
 ## Scanning behavior & edge cases
 
-- **Concurrency:** hashing uses a bounded worker pool (default 4, since this
-  is typically disk-I/O-bound rather than CPU-bound; configurable).
+- **Concurrency:** the walk fans directory reads out across a bounded pool
+  (`DEDUPER_WALK_WORKERS`, default ~2× CPU) and streams the results into one
+  batching DB writer; hashing uses its own bounded pool (`DEDUPER_HASH_WORKERS`,
+  default ~1× CPU). All database writes go through a single-writer connection in
+  batched transactions, while reads (the UI) use a separate concurrent pool so
+  they don't queue behind a running scan. `DEDUPER_MEMORY_LIMIT_MIB` sets a soft
+  heap ceiling (as does the standard `GOMEMLIMIT`).
 - **Streaming:** files are hashed via `io.Copy` into the hash function, never
   loaded fully into memory, regardless of size.
 - **Symlinks:** not followed. Recorded as seen but excluded from hashing and
