@@ -1,6 +1,7 @@
 package web
 
 import (
+	"github.com/mophead64/deduper/internal/version"
 	"net/http"
 	"strconv"
 	"strings"
@@ -38,6 +39,7 @@ func (s *Server) handleDashboard(w http.ResponseWriter, r *http.Request) {
 		"RecentScans": scans,
 		"Current":     current,
 		"Running":     s.isRunning(),
+		"Version":     version.Version,
 	})
 }
 

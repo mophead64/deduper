@@ -48,6 +48,25 @@ func formatDuration(start time.Time, end *time.Time) string {
 	if end != nil {
 		e = *end
 	}
-	d := e.Sub(start).Round(time.Second)
-	return d.String()
+	return humanDuration(e.Sub(start))
+}
+
+// humanDuration renders 45s, 3m 12s, 2h 5m 12s, or 1d 4h 5m 12s. The JS in
+// scan_panel.html mirrors this format for the live elapsed counter.
+func humanDuration(d time.Duration) string {
+	s := int64(d.Round(time.Second) / time.Second)
+	if s < 0 {
+		s = 0
+	}
+	days, hours, mins, secs := s/86400, s%86400/3600, s%3600/60, s%60
+	switch {
+	case days > 0:
+		return fmt.Sprintf("%dd %dh %dm %ds", days, hours, mins, secs)
+	case hours > 0:
+		return fmt.Sprintf("%dh %dm %ds", hours, mins, secs)
+	case mins > 0:
+		return fmt.Sprintf("%dm %ds", mins, secs)
+	default:
+		return fmt.Sprintf("%ds", secs)
+	}
 }

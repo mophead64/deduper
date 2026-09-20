@@ -43,6 +43,10 @@
       </table>
       {{end}}
     </div>
+    <footer class="hint">
+      Deduper {{.Version}}
+      <span hx-get="/version/check" hx-trigger="load" hx-swap="outerHTML"></span>
+    </footer>
   </main>
 </body>
 </html>
