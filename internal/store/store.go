@@ -7,6 +7,8 @@ import (
 	"fmt"
 	"runtime"
 	"strings"
+	"sync"
+	"time"
 
 	_ "modernc.org/sqlite"
 )
@@ -22,6 +24,10 @@ import (
 type Store struct {
 	rw *sql.DB
 	ro *sql.DB
+
+	summaryMu sync.Mutex
+	summary   Summary
+	summaryAt time.Time
 }
 
 const schema = `
@@ -75,6 +81,10 @@ CREATE INDEX IF NOT EXISTS idx_files_size_partial ON files(size, partial_hash);
 CREATE INDEX IF NOT EXISTS idx_files_size_full    ON files(size, full_hash);
 CREATE INDEX IF NOT EXISTS idx_files_dev_inode    ON files(device, inode);
 CREATE INDEX IF NOT EXISTS idx_files_root         ON files(root_id);
+-- Covers the dashboard totals (COUNT/SUM over present files) and the
+-- size-collision lookups in the hash-candidate queries without touching the
+-- table rows.
+CREATE INDEX IF NOT EXISTS idx_files_status_size  ON files(status, size);
 
 CREATE TABLE IF NOT EXISTS duplicate_groups (
     id                      INTEGER PRIMARY KEY,

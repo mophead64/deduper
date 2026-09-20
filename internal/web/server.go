@@ -29,7 +29,8 @@ type Server struct {
 	hub *hub
 	log *slog.Logger
 
-	tmpl *template.Template
+	tmpl    *template.Template
+	updates *updateChecker
 
 	mu      sync.Mutex
 	cancel  context.CancelFunc
@@ -41,7 +42,7 @@ func NewServer(st *store.Store, sc *scanner.Scanner, log *slog.Logger) (*Server,
 	if err != nil {
 		return nil, fmt.Errorf("parse templates: %w", err)
 	}
-	return &Server{st: st, sc: sc, hub: newHub(), log: log, tmpl: tmpl}, nil
+	return &Server{st: st, sc: sc, hub: newHub(), log: log, tmpl: tmpl, updates: newUpdateChecker()}, nil
 }
 
 func (s *Server) Routes() http.Handler {
@@ -50,6 +51,8 @@ func (s *Server) Routes() http.Handler {
 	mux.Handle("GET /static/", http.FileServerFS(staticFS))
 
 	mux.HandleFunc("GET /{$}", s.handleDashboard)
+
+	mux.HandleFunc("GET /version/check", s.handleVersionCheck)
 
 	mux.HandleFunc("POST /roots", s.handleAddRoot)
 	mux.HandleFunc("POST /roots/{id}/delete", s.handleDeleteRoot)

@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"time"
 
 	"github.com/mophead64/deduper/internal/model"
 )
@@ -19,7 +20,7 @@ import (
 // no loading every group key into a Go slice — so it stays cheap and flat in
 // memory even with millions of files.
 func (s *Store) RebuildDuplicateGroups(ctx context.Context) error {
-	return s.inTx(ctx, func(tx *sql.Tx) error {
+	err := s.inTx(ctx, func(tx *sql.Tx) error {
 		if _, err := tx.ExecContext(ctx, `DELETE FROM duplicate_group_members`); err != nil {
 			return err
 		}
@@ -49,6 +50,12 @@ func (s *Store) RebuildDuplicateGroups(ctx context.Context) error {
 		}
 		return nil
 	})
+	if err == nil {
+		s.summaryMu.Lock()
+		s.summaryAt = time.Time{}
+		s.summaryMu.Unlock()
+	}
+	return err
 }
 
 type DuplicateFilter struct {
@@ -154,7 +161,18 @@ type Summary struct {
 	TotalReclaimable int64
 }
 
+// summaryTTL bounds how stale the dashboard totals can be. Aggregating every
+// present file is O(files), so on multi-million-row databases it is computed at
+// most once per TTL no matter how often the dashboard is loaded.
+const summaryTTL = 30 * time.Second
+
 func (s *Store) SummaryStats(ctx context.Context) (Summary, error) {
+	s.summaryMu.Lock()
+	defer s.summaryMu.Unlock()
+	if !s.summaryAt.IsZero() && time.Since(s.summaryAt) < summaryTTL {
+		return s.summary, nil
+	}
+
 	var sum Summary
 	err := s.reader().QueryRowContext(ctx,
 		`SELECT COUNT(*), COALESCE(SUM(size), 0) FROM files WHERE status = 'present'`,
@@ -165,5 +183,9 @@ func (s *Store) SummaryStats(ctx context.Context) (Summary, error) {
 	err = s.reader().QueryRowContext(ctx,
 		`SELECT COUNT(*), COALESCE(SUM(reclaimable_bytes), 0) FROM duplicate_groups`,
 	).Scan(&sum.TotalGroups, &sum.TotalReclaimable)
-	return sum, err
+	if err != nil {
+		return sum, err
+	}
+	s.summary, s.summaryAt = sum, time.Now()
+	return sum, nil
 }

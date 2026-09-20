@@ -26,6 +26,15 @@
           while (n >= 1024 && i < units.length - 1) { n /= 1024; i++; }
           return n.toFixed(1) + " " + units[i];
         }
+        function humanDuration(totalSeconds) {
+          var s = Math.max(0, Math.floor(totalSeconds));
+          var d = Math.floor(s / 86400), h = Math.floor(s % 86400 / 3600),
+              m = Math.floor(s % 3600 / 60), sec = s % 60;
+          if (d > 0) return d + "d " + h + "h " + m + "m " + sec + "s";
+          if (h > 0) return h + "h " + m + "m " + sec + "s";
+          if (m > 0) return m + "m " + sec + "s";
+          return sec + "s";
+        }
         es.addEventListener("progress", function(e) {
           var d = JSON.parse(e.data);
           setText("sp-phase", d.phase);
@@ -36,7 +45,7 @@
           setText("sp-skipped", d.files_skipped);
           setText("sp-bytes", humanBytes(d.bytes_hashed));
           setText("sp-path", d.current_path || " ");
-          setText("sp-elapsed", Math.round(d.elapsed_ms / 1000) + "s elapsed");
+          setText("sp-elapsed", humanDuration(d.elapsed_ms / 1000) + " elapsed");
           var fill = document.getElementById("sp-fill");
           if (fill) {
             // Phase alone doesn't give a reliable percentage (total file
