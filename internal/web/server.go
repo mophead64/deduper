@@ -89,6 +89,9 @@ func (s *Server) isRunning() bool {
 // cleanly, so a scan that fails partway through leaves the last-known-good
 // duplicate data in place rather than replacing it with partial results.
 func (s *Server) startScan(roots []model.Root) (int64, error) {
+	if s.st.Indexing() {
+		return 0, fmt.Errorf("a one-time database index build is in progress; try again in a few minutes (see the app log)")
+	}
 	s.mu.Lock()
 	if s.running {
 		s.mu.Unlock()
