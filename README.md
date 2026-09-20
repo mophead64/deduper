@@ -289,7 +289,10 @@ live-update and need a manual reload to see a scan's result.
 - **Duplicates browser** — duplicate groups sorted by `reclaimable_bytes`
   descending by default; filter by root, minimum size, path/name substring;
   each group expands to show member paths, size, mtime, and a "hardlinked"
-  badge where applicable.
+  badge where applicable. "Rescan this group" re-checks just that group's
+  files on disk (no scan record is created): deleted files leave the group,
+  changed files are re-hashed and stay only if they still match, and the group
+  disappears once fewer than two copies remain. Use it while cleaning up.
 - **Scan history** — past scans with their summary stats and status.
 
 ## Non-functional notes

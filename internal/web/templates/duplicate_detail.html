@@ -11,6 +11,16 @@
   {{template "nav" .}}
   <main>
     <p><a href="/duplicates" class="muted">← Back to duplicates</a></p>
+    {{with .Rescan}}
+    <div class="panel">
+      {{if or .Missing .Changed}}
+        Rescanned: {{.Missing}} file(s) no longer present, {{.Changed}} changed on disk.
+      {{else}}
+        Rescanned: nothing has changed on disk.
+      {{end}}
+      {{if .Errors}}<strong>{{.Errors}} file(s) could not be checked and were left as-is.</strong>{{end}}
+    </div>
+    {{end}}
     <div class="panel">
       <h2>Duplicate group</h2>
       <div class="row">
@@ -21,7 +31,12 @@
       </div>
     </div>
     <div class="panel">
-      <h2>Files</h2>
+      <div class="row between">
+        <h2>Files</h2>
+        <form method="post" action="/duplicates/{{.Group.ID}}/rescan">
+          <button type="submit" class="secondary">Rescan this group</button>
+        </form>
+      </div>
       <table>
         <thead><tr><th>Root</th><th>Path</th><th></th></tr></thead>
         <tbody>
@@ -34,7 +49,7 @@
         {{end}}
         </tbody>
       </table>
-      <footer class="hint">Deduper only flags duplicates — nothing here has been or will be deleted automatically.</footer>
+      <footer class="hint">Deduper only flags duplicates — nothing here has been or will be deleted automatically. Rescan after cleaning up to refresh this group from disk; it doesn't create a scan.</footer>
     </div>
   </main>
 </body>

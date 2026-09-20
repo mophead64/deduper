@@ -1,7 +1,9 @@
 package web
 
 import (
+	"fmt"
 	"net/http"
+	"net/url"
 	"strconv"
 
 	"github.com/mophead64/deduper/internal/model"
@@ -58,6 +60,7 @@ func (s *Server) handleDuplicates(w http.ResponseWriter, r *http.Request) {
 		"MinSize":    filter.MinSize,
 		"Query":      filter.NameLike,
 		"Roots":      roots,
+		"Resolved":   q.Get("resolved") != "",
 	}
 
 	if r.Header.Get("HX-Request") == "true" {
@@ -103,5 +106,61 @@ func (s *Server) handleDuplicateDetail(w http.ResponseWriter, r *http.Request) {
 	s.render(w, "duplicate_detail.html", map[string]any{
 		"Group":   group,
 		"Members": views,
+		"Rescan":  rescanNotice(r.URL.Query()),
 	})
+}
+
+// handleRescanGroup re-checks one group's files on disk and updates the current
+// state in place (no scan record). It redirects back with the outcome in the
+// query string, or to the list if the group dissolved.
+func (s *Server) handleRescanGroup(w http.ResponseWriter, r *http.Request) {
+	id, err := strconv.ParseInt(r.PathValue("id"), 10, 64)
+	if err != nil {
+		s.badRequest(w, err)
+		return
+	}
+	if s.st.Indexing() || s.isRunning() {
+		s.badRequest(w, errMsg("a scan is in progress; wait for it to finish before rescanning a group"))
+		return
+	}
+	res, err := s.sc.RescanGroup(r.Context(), id)
+	if err != nil {
+		s.serverError(w, err)
+		return
+	}
+	if r.FormValue("from") == "list" {
+		// Back to the list with its filters and page, taken from the Referer
+		// (same-origin /duplicates only) so the redirect can't go elsewhere.
+		back := url.Values{}
+		if ref, err := url.Parse(r.Referer()); err == nil && ref.Path == "/duplicates" {
+			back = ref.Query()
+		}
+		if !res.Exists {
+			back.Set("resolved", "1")
+		} else {
+			back.Del("resolved")
+		}
+		http.Redirect(w, r, "/duplicates?"+back.Encode(), http.StatusSeeOther)
+		return
+	}
+	if !res.Exists {
+		http.Redirect(w, r, "/duplicates?resolved=1", http.StatusSeeOther)
+		return
+	}
+	http.Redirect(w, r, fmt.Sprintf("/duplicates/%d?rescanned=1&missing=%d&changed=%d&errors=%d",
+		id, res.Missing, res.Changed, res.Errors), http.StatusSeeOther)
+}
+
+type rescanView struct {
+	Missing, Changed, Errors int
+}
+
+// rescanNotice decodes the outcome handleRescanGroup put in the redirect URL,
+// or returns nil if the page wasn't reached via a rescan.
+func rescanNotice(q url.Values) *rescanView {
+	if q.Get("rescanned") == "" {
+		return nil
+	}
+	n := func(k string) int { v, _ := strconv.Atoi(q.Get(k)); return v }
+	return &rescanView{Missing: n("missing"), Changed: n("changed"), Errors: n("errors")}
 }

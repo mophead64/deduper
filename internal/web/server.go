@@ -65,6 +65,7 @@ func (s *Server) Routes() http.Handler {
 
 	mux.HandleFunc("GET /duplicates", s.handleDuplicates)
 	mux.HandleFunc("GET /duplicates/{id}", s.handleDuplicateDetail)
+	mux.HandleFunc("POST /duplicates/{id}/rescan", s.handleRescanGroup)
 
 	return mux
 }

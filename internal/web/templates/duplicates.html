@@ -10,6 +10,7 @@
 <body>
   {{template "nav" .}}
   <main>
+    {{if .Resolved}}<div class="panel">That group is resolved: fewer than two copies remain.</div>{{end}}
     <div class="panel">
       <h2>Duplicate groups</h2>
       <form class="row" hx-get="/duplicates" hx-target="#dup-results" hx-push-url="true">
