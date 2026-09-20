@@ -4,6 +4,41 @@
     --bg: #f7f8fa; --panel: #ffffff; --border: #e2e5ea; --text: #1f2430;
     --muted: #6b7280; --accent: #2563eb; --accent-dark: #1d4ed8;
     --danger: #dc2626; --good: #16a34a; --radius: 8px;
+    --code-bg: #eef0f4; --hover: #f0f1f3; --danger-bg: #fef2f2; --track: #e5e7eb;
+    --err-border: #fecaca; --err-text: #991b1b;
+    --b-green-bg: #dcfce7; --b-green: #166534; --b-gray-bg: #f3f4f6; --b-gray: #6b7280;
+    --b-blue-bg: #dbeafe; --b-blue: #1e40af; --b-red-bg: #fee2e2; --b-red: #991b1b;
+    --b-amber-bg: #fef3c7; --b-amber: #92400e; --b-purple-bg: #ede9fe; --b-purple: #5b21b6;
+    --b-manual: #374151;
+    color-scheme: light;
+  }
+  /* Dark palette. Applied for an explicit choice, or for "auto" (no data-theme)
+     when the OS prefers dark. CSS can't share one block across both selectors. */
+  :root[data-theme="dark"] {
+    --bg: #0f1218; --panel: #181c25; --border: #2a303c; --text: #e6e8ee;
+    --muted: #9aa3b2; --accent: #3b82f6; --accent-dark: #2563eb;
+    --danger: #f87171; --good: #4ade80;
+    --code-bg: #262c39; --hover: #232936; --danger-bg: #2a1618; --track: #2a303c;
+    --err-border: #7f1d1d; --err-text: #fca5a5;
+    --b-green-bg: #14532d; --b-green: #bbf7d0; --b-gray-bg: #2a303c; --b-gray: #9aa3b2;
+    --b-blue-bg: #1e3a8a; --b-blue: #bfdbfe; --b-red-bg: #7f1d1d; --b-red: #fecaca;
+    --b-amber-bg: #78350f; --b-amber: #fde68a; --b-purple-bg: #4c1d95; --b-purple: #ddd6fe;
+    --b-manual: #d1d5db;
+    color-scheme: dark;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme]) {
+      --bg: #0f1218; --panel: #181c25; --border: #2a303c; --text: #e6e8ee;
+      --muted: #9aa3b2; --accent: #3b82f6; --accent-dark: #2563eb;
+      --danger: #f87171; --good: #4ade80;
+      --code-bg: #262c39; --hover: #232936; --danger-bg: #2a1618; --track: #2a303c;
+      --err-border: #7f1d1d; --err-text: #fca5a5;
+      --b-green-bg: #14532d; --b-green: #bbf7d0; --b-gray-bg: #2a303c; --b-gray: #9aa3b2;
+      --b-blue-bg: #1e3a8a; --b-blue: #bfdbfe; --b-red-bg: #7f1d1d; --b-red: #fecaca;
+      --b-amber-bg: #78350f; --b-amber: #fde68a; --b-purple-bg: #4c1d95; --b-purple: #ddd6fe;
+      --b-manual: #d1d5db;
+      color-scheme: dark;
+    }
   }
   * { box-sizing: border-box; }
   body {
@@ -13,7 +48,16 @@
   nav {
     display: flex; align-items: center; gap: 24px; padding: 14px 24px;
     background: var(--panel); border-bottom: 1px solid var(--border);
+    position: sticky; top: 0; z-index: 10;
   }
+  .theme-switch { margin-left: auto; display: inline-flex; border: 1px solid var(--border); border-radius: 6px; overflow: hidden; }
+  .theme-switch button {
+    background: var(--panel); color: var(--muted); border: none; border-radius: 0;
+    padding: 4px 10px; font-size: 13px;
+  }
+  .theme-switch button + button { border-left: 1px solid var(--border); }
+  .theme-switch button:hover { background: var(--hover); }
+  .theme-switch button[aria-pressed="true"] { background: var(--accent); color: white; }
   nav .brand { font-weight: 700; font-size: 17px; }
   nav a { color: var(--muted); text-decoration: none; font-weight: 500; }
   nav a:hover, nav a.active { color: var(--text); }
@@ -31,10 +75,11 @@
   th, td { text-align: left; padding: 8px 10px; border-bottom: 1px solid var(--border); }
   th { color: var(--muted); font-weight: 600; font-size: 12px; text-transform: uppercase; }
   tr:last-child td { border-bottom: none; }
-  code { background: #eef0f4; padding: 1px 5px; border-radius: 4px; font-size: 13px; }
+  code { background: var(--code-bg); padding: 1px 5px; border-radius: 4px; font-size: 13px; }
   form.inline { display: inline; }
   input[type=text], input[type=number], select {
     padding: 7px 10px; border: 1px solid var(--border); border-radius: 6px; font-size: 14px;
+    background: var(--panel); color: var(--text);
   }
   button, .btn {
     padding: 7px 14px; border-radius: 6px; border: 1px solid var(--accent); background: var(--accent);
@@ -42,29 +87,39 @@
   }
   button:hover { background: var(--accent-dark); }
   button.secondary { background: var(--panel); color: var(--text); border-color: var(--border); }
-  button.secondary:hover { background: #f0f1f3; }
+  button.secondary:hover { background: var(--hover); }
   button.danger { background: var(--panel); color: var(--danger); border-color: var(--danger); }
-  button.danger:hover { background: #fef2f2; }
+  button.danger:hover { background: var(--danger-bg); }
   .badge { display: inline-block; padding: 2px 8px; border-radius: 999px; font-size: 12px; font-weight: 600; }
-  .badge.on { background: #dcfce7; color: #166534; }
-  .badge.off { background: #f3f4f6; color: #6b7280; }
-  .badge.running { background: #dbeafe; color: #1e40af; }
-  .badge.completed { background: #dcfce7; color: #166534; }
-  .badge.failed { background: #fee2e2; color: #991b1b; }
-  .badge.interrupted { background: #fef3c7; color: #92400e; }
-  .badge.update { background: #fef3c7; color: #92400e; text-decoration: none; }
-  .badge.auto { background: #ede9fe; color: #5b21b6; }
-  .badge.manual { background: #f3f4f6; color: #374151; }
+  .badge.on { background: var(--b-green-bg); color: var(--b-green); }
+  .badge.off { background: var(--b-gray-bg); color: var(--b-gray); }
+  .badge.running { background: var(--b-blue-bg); color: var(--b-blue); }
+  .badge.completed { background: var(--b-green-bg); color: var(--b-green); }
+  .badge.failed { background: var(--b-red-bg); color: var(--b-red); }
+  .badge.interrupted { background: var(--b-amber-bg); color: var(--b-amber); }
+  .badge.update { background: var(--b-amber-bg); color: var(--b-amber); text-decoration: none; }
+  .badge.auto { background: var(--b-purple-bg); color: var(--b-purple); }
+  .badge.manual { background: var(--b-gray-bg); color: var(--b-manual); }
   .muted { color: var(--muted); }
   .row { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
   .row.between { justify-content: space-between; }
-  .progress-bar { height: 8px; background: #e5e7eb; border-radius: 999px; overflow: hidden; margin: 10px 0; }
+  .progress-bar { height: 8px; background: var(--track); border-radius: 999px; overflow: hidden; margin: 10px 0; }
   .progress-bar .fill { height: 100%; background: var(--accent); width: 0%; transition: width .3s; }
   .path-line { font-size: 12px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-  .error-box { background: #fef2f2; border: 1px solid #fecaca; color: #991b1b; padding: 10px 14px; border-radius: 6px; margin-bottom: 16px; }
+  .error-box { background: var(--danger-bg); border: 1px solid var(--err-border); color: var(--err-text); padding: 10px 14px; border-radius: 6px; margin-bottom: 16px; }
   .pagination { display: flex; gap: 8px; align-items: center; margin-top: 12px; }
   footer.hint { color: var(--muted); font-size: 12px; margin-top: 8px; }
 </style>
+<script>
+  // Runs in <head> so the saved choice applies before first paint (no flash).
+  // No saved value = "auto": leave data-theme unset and follow the OS.
+  (function () {
+    try {
+      var t = localStorage.getItem("deduper-theme");
+      if (t === "dark" || t === "light") document.documentElement.setAttribute("data-theme", t);
+    } catch (e) {}
+  })();
+</script>
 {{end}}
 
 {{define "nav"}}
@@ -73,6 +128,39 @@
   <a href="/">Dashboard</a>
   <a href="/duplicates">Duplicates</a>
   <a href="/scans">Scan History</a>
+  <div class="theme-switch" role="group" aria-label="Colour theme">
+    <button type="button" class="secondary" data-theme-choice="auto">Auto</button>
+    <button type="button" class="secondary" data-theme-choice="dark">Dark</button>
+    <button type="button" class="secondary" data-theme-choice="light">Light</button>
+  </div>
+  <script>
+    (function () {
+      var root = document.documentElement;
+      var buttons = document.querySelectorAll("[data-theme-choice]");
+      function current() {
+        var t = root.getAttribute("data-theme");
+        return t === "dark" || t === "light" ? t : "auto";
+      }
+      function mark() {
+        buttons.forEach(function (b) {
+          b.setAttribute("aria-pressed", String(b.dataset.themeChoice === current()));
+        });
+      }
+      buttons.forEach(function (b) {
+        b.addEventListener("click", function () {
+          var c = b.dataset.themeChoice;
+          if (c === "auto") root.removeAttribute("data-theme");
+          else root.setAttribute("data-theme", c);
+          try {
+            if (c === "auto") localStorage.removeItem("deduper-theme");
+            else localStorage.setItem("deduper-theme", c);
+          } catch (e) {}
+          mark();
+        });
+      });
+      mark();
+    })();
+  </script>
 </nav>
 {{end}}
 
