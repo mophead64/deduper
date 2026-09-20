@@ -5,9 +5,11 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"log/slog"
 	"runtime"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	_ "modernc.org/sqlite"
@@ -24,6 +26,8 @@ import (
 type Store struct {
 	rw *sql.DB
 	ro *sql.DB
+
+	indexing atomic.Bool
 
 	summaryMu sync.Mutex
 	summary   Summary
@@ -81,10 +85,7 @@ CREATE INDEX IF NOT EXISTS idx_files_size_partial ON files(size, partial_hash);
 CREATE INDEX IF NOT EXISTS idx_files_size_full    ON files(size, full_hash);
 CREATE INDEX IF NOT EXISTS idx_files_dev_inode    ON files(device, inode);
 CREATE INDEX IF NOT EXISTS idx_files_root         ON files(root_id);
--- Covers the dashboard totals (COUNT/SUM over present files) and the
--- size-collision lookups in the hash-candidate queries without touching the
--- table rows.
-CREATE INDEX IF NOT EXISTS idx_files_status_size  ON files(status, size);
+
 
 CREATE TABLE IF NOT EXISTS duplicate_groups (
     id                      INTEGER PRIMARY KEY,
@@ -222,3 +223,53 @@ func (s *Store) conn() *sql.DB { return s.rw }
 // reader is the concurrent read pool: SELECTs that must not queue behind a
 // running scan's writes.
 func (s *Store) reader() *sql.DB { return s.ro }
+
+// statusSizeIndex covers the dashboard totals (COUNT/SUM over present files)
+// and the size-collision lookups in the hash-candidate queries without touching
+// table rows. On a multi-million-row database building it takes minutes, so it
+// is created in the background by EnsureIndexes rather than during Open.
+const statusSizeIndex = "idx_files_status_size"
+
+// Indexing reports whether EnsureIndexes is currently building an index. The
+// build holds SQLite's single write lock, so scans can't start until it ends.
+func (s *Store) Indexing() bool { return s.indexing.Load() }
+
+// EnsureIndexes creates any missing large indexes, logging progress. It blocks
+// until done; call it from a goroutine.
+func (s *Store) EnsureIndexes(ctx context.Context, log *slog.Logger) error {
+	var n int
+	if err := s.reader().QueryRowContext(ctx,
+		`SELECT COUNT(*) FROM sqlite_master WHERE type = 'index' AND name = ?`, statusSizeIndex).Scan(&n); err != nil {
+		return err
+	}
+	if n > 0 {
+		return nil
+	}
+
+	s.indexing.Store(true)
+	defer s.indexing.Store(false)
+
+	start := time.Now()
+	log.Info("building index (one-time, can take several minutes on large databases; scans are blocked meanwhile)", "index", statusSizeIndex)
+	done := make(chan struct{})
+	defer close(done)
+	go func() {
+		t := time.NewTicker(30 * time.Second)
+		defer t.Stop()
+		for {
+			select {
+			case <-t.C:
+				log.Info("still building index", "index", statusSizeIndex, "elapsed", time.Since(start).Round(time.Second).String())
+			case <-done:
+				return
+			}
+		}
+	}()
+
+	if _, err := s.conn().ExecContext(ctx,
+		`CREATE INDEX IF NOT EXISTS `+statusSizeIndex+` ON files(status, size)`); err != nil {
+		return err
+	}
+	log.Info("index built", "index", statusSizeIndex, "elapsed", time.Since(start).Round(time.Second).String())
+	return nil
+}

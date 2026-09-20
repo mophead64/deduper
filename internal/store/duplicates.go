@@ -189,3 +189,88 @@ func (s *Store) SummaryStats(ctx context.Context) (Summary, error) {
 	s.summary, s.summaryAt = sum, time.Now()
 	return sum, nil
 }
+
+// GroupRescanUpdate is one member whose on-disk stat data no longer matches the
+// store. The scanner re-hashes it, so Hash is its current full hash.
+type GroupRescanUpdate struct {
+	ID      int64
+	Size    int64
+	MTimeNs int64
+	Device  uint64
+	Inode   uint64
+	Hash    string
+}
+
+// ApplyGroupRescan folds the result of re-checking one duplicate group's files
+// into the current state without touching scan history or any other group:
+//   - missing files are flagged 'missing' and leave the group;
+//   - updated files get their fresh stat data and hash, and stay in the group
+//     only if they still match it (a changed file that no longer matches is
+//     picked up by the next full scan's regroup);
+//   - the group's counts are recomputed, and the group is deleted if fewer than
+//     two members remain.
+//
+// It reports whether the group still exists.
+func (s *Store) ApplyGroupRescan(ctx context.Context, groupID int64, missing []int64, updates []GroupRescanUpdate) (exists bool, err error) {
+	err = s.inTx(ctx, func(tx *sql.Tx) error {
+		var size int64
+		var hash string
+		if err := tx.QueryRowContext(ctx,
+			`SELECT size, full_hash FROM duplicate_groups WHERE id = ?`, groupID).Scan(&size, &hash); err != nil {
+			return err
+		}
+		now := time.Now().UTC()
+
+		for _, id := range missing {
+			if _, err := tx.ExecContext(ctx,
+				`UPDATE files SET status = 'missing', updated_at = ? WHERE id = ?`, now, id); err != nil {
+				return err
+			}
+			if _, err := tx.ExecContext(ctx,
+				`DELETE FROM duplicate_group_members WHERE group_id = ? AND file_id = ?`, groupID, id); err != nil {
+				return err
+			}
+		}
+		for _, u := range updates {
+			if _, err := tx.ExecContext(ctx,
+				`UPDATE files SET size = ?, mtime_ns = ?, device = ?, inode = ?,
+				   partial_hash = '', full_hash = ?, status = 'present', updated_at = ?
+				 WHERE id = ?`, u.Size, u.MTimeNs, u.Device, u.Inode, u.Hash, now, u.ID); err != nil {
+				return err
+			}
+			if u.Size != size || u.Hash != hash {
+				if _, err := tx.ExecContext(ctx,
+					`DELETE FROM duplicate_group_members WHERE group_id = ? AND file_id = ?`, groupID, u.ID); err != nil {
+					return err
+				}
+			}
+		}
+
+		var members, instances int64
+		if err := tx.QueryRowContext(ctx,
+			`SELECT COUNT(*), COUNT(DISTINCT f.device || '/' || f.inode)
+			 FROM duplicate_group_members m JOIN files f ON f.id = m.file_id
+			 WHERE m.group_id = ?`, groupID).Scan(&members, &instances); err != nil {
+			return err
+		}
+		if members < 2 {
+			if _, err := tx.ExecContext(ctx,
+				`DELETE FROM duplicate_group_members WHERE group_id = ?`, groupID); err != nil {
+				return err
+			}
+			_, err := tx.ExecContext(ctx, `DELETE FROM duplicate_groups WHERE id = ?`, groupID)
+			return err
+		}
+		exists = true
+		_, err := tx.ExecContext(ctx,
+			`UPDATE duplicate_groups SET member_count = ?, distinct_instance_count = ?, reclaimable_bytes = ? WHERE id = ?`,
+			members, instances, (instances-1)*size, groupID)
+		return err
+	})
+	if err == nil {
+		s.summaryMu.Lock()
+		s.summaryAt = time.Time{}
+		s.summaryMu.Unlock()
+	}
+	return exists, err
+}

@@ -16,7 +16,10 @@
         <td>{{.DistinctInstanceCount}}{{if ne .DistinctInstanceCount .MemberCount}} <span class="muted">({{.MemberCount}} paths, some hardlinked)</span>{{end}}</td>
         <td><strong>{{bytes .ReclaimableBytes}}</strong></td>
         <td><code>{{shorthash .FullHash}}</code></td>
-        <td><a href="/duplicates/{{.ID}}" class="btn secondary">View</a></td>
+        <td class="row">
+          <a href="/duplicates/{{.ID}}" class="btn secondary">View</a>
+          <form method="post" action="/duplicates/{{.ID}}/rescan"><input type="hidden" name="from" value="list"><button type="submit" class="secondary">Rescan</button></form>
+        </td>
       </tr>
     {{end}}
     </tbody>

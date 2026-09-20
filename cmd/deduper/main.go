@@ -17,6 +17,7 @@ import (
 
 	"github.com/mophead64/deduper/internal/scanner"
 	"github.com/mophead64/deduper/internal/store"
+	"github.com/mophead64/deduper/internal/version"
 	"github.com/mophead64/deduper/internal/web"
 )
 
@@ -49,12 +50,15 @@ func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
+	log.Info("starting", "version", version.Version, "db", dbPath)
+	t0 := time.Now()
 	st, err := store.Open(ctx, dbPath)
 	if err != nil {
 		log.Error("failed to open database", "path", dbPath, "error", err)
 		os.Exit(1)
 	}
 	defer st.Close()
+	log.Info("database opened", "elapsed", time.Since(t0).Round(time.Millisecond).String())
 
 	if err := st.MarkInterruptedScans(ctx); err != nil {
 		log.Error("failed to reconcile interrupted scans", "error", err)
@@ -65,6 +69,12 @@ func main() {
 	} else if len(added) > 0 {
 		log.Info("auto-discovered roots", "base", scanBase, "added", added)
 	}
+
+	go func() {
+		if err := st.EnsureIndexes(ctx, log); err != nil && ctx.Err() == nil {
+			log.Error("index build failed", "error", err)
+		}
+	}()
 
 	scanOpts := scanner.DefaultOptions()
 	if n := getenvInt(log, "DEDUPER_WALK_WORKERS"); n > 0 {
